@@ -38,13 +38,19 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/component-base/metrics/legacyregistry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
+	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
@@ -156,7 +162,39 @@ func run() error {
 		Name:      *poolName,
 		Namespace: *poolNamespace,
 	}
-	mgr, err := runserver.NewDefaultManager(poolNamespacedName, cfg)
+	// mgr, err := runserver.NewDefaultManager(poolNamespacedName, cfg)
+	var scheme = runtime.NewScheme()
+	mgr, err := runserver.NewManagerWithOptions(cfg, ctrl.Options{
+		Scheme: scheme,
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Pod{}: {
+					Namespaces: map[string]cache.Config{
+						poolNamespacedName.Namespace: {},
+					},
+				},
+				&v1alpha2.InferencePool{}: {
+					Namespaces: map[string]cache.Config{
+						poolNamespacedName.Namespace: {
+							FieldSelector: fields.SelectorFromSet(fields.Set{
+								"metadata.name": poolNamespacedName.Name,
+							}),
+						},
+					},
+				},
+				&v1alpha2.InferenceModel{}: {
+					Namespaces: map[string]cache.Config{
+						poolNamespacedName.Namespace: {
+							FieldSelector: fields.SelectorFromSet(fields.Set{
+								"metadata.name": poolNamespacedName.Name,
+							}),
+						},
+					},
+				},
+			},
+		},
+	})
+
 	if err != nil {
 		setupLog.Error(err, "Failed to create controller manager")
 		return err
